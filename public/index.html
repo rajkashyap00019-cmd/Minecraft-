@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="hi">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>MINECARFT</title>
+<style>
+*{box-sizing:border-box}body{margin:0;overflow:hidden;font-family:Arial;background:#87ceeb}#game{position:fixed;inset:0}
+#menu{position:fixed;inset:0;z-index:5;display:grid;place-items:center;background:linear-gradient(#071b30d9,#06111fee);color:white}
+#panel{width:min(94vw,460px);max-height:92vh;overflow:auto;padding:20px;border:1px solid #ffffff55;border-radius:18px;background:#10243beF;text-align:center;box-shadow:0 15px 50px #0008}
+h1{margin:0 0 8px;font-size:30px}p{font-size:13px;line-height:1.5;color:#dbeafe}
+input{width:100%;padding:13px;margin:5px 0;border:0;border-radius:9px;font-size:16px}
+button{border:0;border-radius:10px;padding:12px 15px;margin:4px;background:#22c55e;color:#052e16;font-weight:bold;font-size:14px}
+button.alt{background:#334155;color:white}.server-list{display:grid;gap:7px;margin:12px 0;text-align:left}.server-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px;border-radius:10px;background:#ffffff12;border:1px solid #ffffff22}.server-row small{display:block;color:#cbd5e1;margin-top:3px}.server-row button{margin:0;padding:9px 12px}.section{font-size:13px;color:#bfdbfe;text-align:left;margin:12px 0 5px;font-weight:bold}.muted{font-size:11px;color:#cbd5e1}#top{position:fixed;top:10px;left:10px;right:10px;display:flex;justify-content:space-between;gap:8px;pointer-events:none;color:white}
+.pill{background:#071827bb;padding:9px 12px;border-radius:10px;font-size:12px}
+#bottom{position:fixed;bottom:12px;left:10px;right:10px;display:flex;justify-content:space-between;align-items:end;pointer-events:none}
+#pad,#actions{pointer-events:auto}#pad{display:grid;grid-template-columns:48px 48px 48px;grid-template-rows:44px 44px 44px;gap:4px}
+#pad button,#actions button{background:#071827bb;color:white;border:1px solid #ffffff66;padding:5px}
+#pad .up{grid-column:2}#pad .left{grid-column:1;grid-row:2}#pad .down{grid-column:2;grid-row:2}#pad .right{grid-column:3;grid-row:2}
+#actions{display:flex;flex-direction:column;align-items:end}#actions button{min-width:84px}
+#bar{position:fixed;bottom:8px;left:50%;transform:translateX(-50%);display:flex;gap:4px}
+.slot{width:42px;height:42px;background:#111c;border:2px solid #ffffff77;border-radius:7px;color:white;font-size:10px;display:grid;place-items:center}
+.slot.active{border-color:#fde047}
+#tip{position:fixed;bottom:65px;left:10px;color:white;background:#071827aa;padding:6px 8px;border-radius:8px;font-size:11px}
+</style></head>
+<body>
+<div id="game"></div>
+<div id="top"><div class="pill" id="state">Not connected</div><div class="pill" id="roomLabel">MINECARFT</div></div>
+<div id="tip">Move: WASD / buttons • Drag screen to look • Break / Place</div>
+<div id="bottom">
+ <div id="pad"><button class="up" data-k="forward">▲</button><button class="left" data-k="left">◀</button><button class="down" data-k="back">▼</button><button class="right" data-k="right">▶</button></div>
+ <div id="actions"><button id="jump">JUMP</button><button id="break">BREAK</button><button id="place">PLACE</button></div>
+</div><div id="bar"></div>
+<div id="menu"><div id="panel">
+<h1>⛏️ MINECARFT</h1><p>Online Multiplayer • Real Players • No Bots</p>
+<input id="name" maxlength="14" placeholder="Player name" value="Player">
+<div class="section">🌐 PUBLIC SERVERS</div>
+<div id="serverList" class="server-list"><div class="muted">Loading active servers...</div></div>
+<button class="alt" id="refresh">↻ Refresh Servers</button>
+<div class="section">🚀 CREATE YOUR SERVER</div>
+<button id="create">CREATE PUBLIC SERVER</button>
+<div class="section">🔑 JOIN WITH ROOM CODE</div>
+<input id="room" maxlength="8" placeholder="Enter room code">
+<button id="join" class="alt">JOIN SERVER</button>
+<p class="muted">Public list mein wahi real servers dikhenge jo is game ke online host par active hain. Friends ko apna room code bhejo.</p>
+</div></div>
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
+<script>
+(()=>{
+const $=id=>document.getElementById(id),root=$('game');
+let scene,camera,renderer,clock,me,playerId=null,socket=null,roomCode='',players={},blocks=[],selected=0;
+let yaw=0,pitch=0,keys={},touch={},velocityY=0,onGround=true,worldReady=false;
+const materials=[
+ new THREE.MeshStandardMaterial({color:0x55a84f,roughness:1}),
+ new THREE.MeshStandardMaterial({color:0x805333,roughness:1}),
+ new THREE.MeshStandardMaterial({color:0x858b91,roughness:.9}),
+ new THREE.MeshStandardMaterial({color:0x9b673b,roughness:.85}),
+ new THREE.MeshStandardMaterial({color:0xb95743,roughness:.8}),
+ new THREE.MeshStandardMaterial({color:0x318bd1,roughness:.25,metalness:.1})
+];
+const geo=new THREE.BoxGeometry(1,1,1),ray=new THREE.Raycaster();
+function init(){
+ scene=new THREE.Scene();scene.background=new THREE.Color(0x91d5ff);scene.fog=new THREE.Fog(0x91d5ff,30,100);
+ camera=new THREE.PerspectiveCamera(72,innerWidth/innerHeight,.1,300);camera.rotation.order='YXZ';
+ renderer=new THREE.WebGLRenderer({antialias:true,powerPreference:'high-performance'});
+ renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.setSize(innerWidth,innerHeight);
+ renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+ renderer.outputColorSpace=THREE.SRGBColorSpace;root.appendChild(renderer.domElement);
+ scene.add(new THREE.HemisphereLight(0xdff3ff,0x53634a,1.6));
+ const sun=new THREE.DirectionalLight(0xfff1d0,2.4);sun.position.set(-25,45,20);sun.castShadow=true;
+ sun.shadow.mapSize.set(1024,1024);sun.shadow.camera.left=-45;sun.shadow.camera.right=45;sun.shadow.camera.top=45;sun.shadow.camera.bottom=-45;scene.add(sun);
+ const ground=new THREE.Mesh(new THREE.PlaneGeometry(180,180),new THREE.MeshStandardMaterial({color:0x4c9b45,roughness:1}));
+ ground.rotation.x=-Math.PI/2;ground.position.y=-.51;ground.receiveShadow=true;scene.add(ground);
+ makeTerrain();makeHotbar();bindControls();clock=new THREE.Clock();animate();
+}
+function addBlock(x,y,z,type=0,id=null,send=false){
+ if(blocks.some(b=>b.position.x===x&&b.position.y===y&&b.position.z===z))return;
+ const m=new THREE.Mesh(geo,materials[type]||materials[0]);m.position.set(x,y,z);m.castShadow=true;m.receiveShadow=true;m.userData={type,id};
+ scene.add(m);blocks.push(m);
+ if(send&&socket?.connected)socket.emit('blockAdd',{x,y,z,type});
+}
+function removeBlock(m,send=false){
+ if(!m)return;const {x,y,z}=m.position;
+ scene.remove(m);blocks=blocks.filter(b=>b!==m);
+ if(send&&socket?.connected)socket.emit('blockRemove',{x,y,z});
+}
+function makeTerrain(){
+ for(let x=-18;x<=18;x++)for(let z=-18;z<=18;z++){
+  let h=Math.floor((Math.sin(x*.25)+Math.cos(z*.28))*0.7);
+  addBlock(x,h,z,0);
+  if((x*13+z*7)%61===0&&Math.abs(x)+Math.abs(z)>8)tree(x,h+1,z);
+ }
+ // Decorative water pond
+ const water=new THREE.Mesh(new THREE.PlaneGeometry(12,9),new THREE.MeshStandardMaterial({color:0x278ac5,transparent:true,opacity:.78,roughness:.2}));
+ water.rotation.x=-Math.PI/2;water.position.set(8,.03,8);scene.add(water);
+}
+function tree(x,y,z){
+ for(let i=0;i<4;i++)addBlock(x,y+i,z,3);
+ for(let dx=-1;dx<=1;dx++)for(let dz=-1;dz<=1;dz++)for(let dy=2;dy<=3;dy++)addBlock(x+dx,y+dy,z+dz,0);
+}
+function makeAvatar(color=0x2777ee){
+ const g=new THREE.Group();
+ const body=new THREE.Mesh(new THREE.BoxGeometry(.7,1,.4),new THREE.MeshStandardMaterial({color,roughness:.8}));
+ body.position.y=.65;body.castShadow=true;
+ const head=new THREE.Mesh(new THREE.BoxGeometry(.5,.5,.5),new THREE.MeshStandardMaterial({color:0xf1c9a5}));
+ head.position.y=1.4;head.castShadow=true;g.add(body,head);scene.add(g);return g;
+}
+function makeHotbar(){
+ const names=['Grass','Dirt','Stone','Wood','Brick','Water'];
+ $('bar').innerHTML='';
+ names.forEach((n,i)=>{let d=document.createElement('button');d.className='slot'+(i===0?' active':'');d.textContent=(i+1)+' '+n;d.onclick=()=>{selected=i;[...$('bar').children].forEach((e,j)=>e.classList.toggle('active',j===i))};$('bar').appendChild(d)});
+}
+function bindControls(){
+ addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
+ addEventListener('keydown',e=>{keys[e.key.toLowerCase()]=true;if('123456'.includes(e.key)){$('bar').children[+e.key-1]?.click()}});
+ addEventListener('keyup',e=>keys[e.key.toLowerCase()]=false);
+ document.querySelectorAll('[data-k]').forEach(b=>{let k=b.dataset.k;b.onpointerdown=e=>{e.preventDefault();touch[k]=true};['pointerup','pointerleave','pointercancel'].forEach(v=>b.addEventListener(v,()=>touch[k]=false))});
+ $('jump').onclick=()=>{if(onGround){velocityY=.22;onGround=false}};
+ $('break').onclick=breakTarget;$('place').onclick=placeTarget;
+ let dragging=false,lx=0,ly=0;
+ renderer.domElement.addEventListener('pointerdown',e=>{dragging=true;lx=e.clientX;ly=e.clientY});
+ addEventListener('pointerup',()=>dragging=false);
+ addEventListener('pointermove',e=>{if(!dragging)return;let dx=e.clientX-lx,dy=e.clientY-ly;lx=e.clientX;ly=e.clientY;yaw-=dx*.004;pitch=Math.max(-1.25,Math.min(1.25,pitch-dy*.004)});
+ $('join').onclick=()=>connectRoom($('room').value.trim().toUpperCase());
+ $('create').onclick=()=>connectRoom('');
+ $('refresh').onclick=loadServers;
+}
+function connectRoom(wanted){
+ if(!me){me=makeAvatar();me.position.set(0,0,5)}
+ if(typeof io==='undefined'){alert('Socket.IO load नहीं हुआ। Internet check करो।');return}
+ const name=$('name').value.trim()||'Player';
+ // This starter server is expected at the same origin as the hosted game.
+ const serverUrl=location.origin;
+ socket=io(serverUrl,{transports:['websocket','polling']});
+ socket.on('connect',()=>socket.emit('joinRoom',{name,room:wanted||'',isPublic:true}));
+ socket.on('joined',data=>{
+  playerId=socket.id;roomCode=data.room;$('roomLabel').textContent='ROOM: '+roomCode;
+  $('state').textContent='Online • '+data.players.length+' players';
+  data.blocks.forEach(b=>addBlock(b.x,b.y,b.z,b.type));
+  data.players.forEach(p=>{if(p.id!==playerId)addRemote(p)});
+  $('menu').style.display='none';
+ });
+ socket.on('playerJoined',p=>{addRemote(p);$('state').textContent='Online • '+(Object.keys(players).length+1)+' players'});
+ socket.on('playerMoved',p=>{let a=players[p.id];if(a){a.mesh.position.set(p.x,0,p.z);a.mesh.rotation.y=p.yaw||0}});
+ socket.on('playerLeft',id=>{if(players[id]){scene.remove(players[id].mesh);delete players[id]}});
+ socket.on('blockAdded',b=>addBlock(b.x,b.y,b.z,b.type));
+ socket.on('blockRemoved',b=>{let m=blocks.find(v=>v.position.x===b.x&&v.position.y===b.y&&v.position.z===b.z);removeBlock(m)});
+ socket.on('connect_error',()=>{$('state').textContent='Server connection failed';alert('Server चालू/host नहीं है। Server deploy करना होगा।')});
+}
+async function loadServers(){
+ const box=$('serverList');box.innerHTML='<div class="muted">Checking active servers...</div>';
+ try{
+  const res=await fetch('/api/servers');if(!res.ok)throw new Error('offline');
+  const data=await res.json();const list=data.servers||[];box.innerHTML='';
+  if(!list.length){box.innerHTML='<div class="muted">Abhi koi public server online nahi hai. Pehla server tum create kar sakte ho!</div>';return;}
+  list.forEach(server=>{const row=document.createElement('div');row.className='server-row';
+   const info=document.createElement('div');info.innerHTML='<b></b><small></small>';info.querySelector('b').textContent='🌍 '+server.name;info.querySelector('small').textContent='Players: '+server.players+' • Code: '+server.code;
+   const btn=document.createElement('button');btn.textContent='JOIN';btn.onclick=()=>{ $('room').value=server.code;connectRoom(server.code);};row.append(info,btn);box.appendChild(row);
+  });
+ }catch(e){box.innerHTML='<div class="muted">Server list load nahi hui. Game ko online host par open karo.</div>';}
+}
+function addRemote(p){if(players[p.id])return;let mesh=makeAvatar(0x16a6a1);mesh.position.set(p.x||0,0,p.z||0);players[p.id]={mesh,name:p.name}}
+function breakTarget(){
+ ray.setFromCamera(new THREE.Vector2(0,0),camera);let hit=ray.intersectObjects(blocks)[0];
+ if(hit&&hit.distance<7)removeBlock(hit.object,true);
+}
+function placeTarget(){
+ ray.setFromCamera(new THREE.Vector2(0,0),camera);let hit=ray.intersectObjects(blocks)[0];if(!hit||hit.distance>7)return;
+ const p=hit.object.position.clone().add(hit.face.normal);
+ addBlock(Math.round(p.x),Math.round(p.y),Math.round(p.z),selected,null,true);
+}
+function animate(){
+ requestAnimationFrame(animate);let dt=Math.min(clock.getDelta(),.04);
+ if(me){
+  const f=touch.forward||keys.w||keys.arrowup,b=touch.back||keys.s||keys.arrowdown,l=touch.left||keys.a||keys.arrowleft,r=touch.right||keys.d||keys.arrowright;
+  let dx=(r?1:0)-(l?1:0),dz=(b?1:0)-(f?1:0),len=Math.hypot(dx,dz)||1;dx/=len;dz/=len;
+  me.position.x+=(dx*Math.cos(yaw)+dz*Math.sin(yaw))*6*dt;
+  me.position.z+=(-dx*Math.sin(yaw)+dz*Math.cos(yaw))*6*dt;
+  velocityY-=.65*dt;me.position.y+=velocityY;
+  if(me.position.y<=0){me.position.y=0;velocityY=0;onGround=true}
+  me.rotation.y=yaw;camera.position.set(me.position.x,me.position.y+1.55,me.position.z);camera.rotation.set(pitch,yaw,0);
+  if(socket?.connected)socket.emit('move',{x:me.position.x,z:me.position.z,yaw});
+ }
+ renderer.render(scene,camera);
+}
+init();
+loadServers();
+
+})();
+</script></body></html>
